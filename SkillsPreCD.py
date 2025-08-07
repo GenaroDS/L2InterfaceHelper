@@ -32,16 +32,9 @@ ultimates_data = [
     {"nombre": "Ghost Walking", "duracion": 30, "cd": 900},
     {"nombre": "Exciting Adventure", "duracion": 30, "cd": 900},
     {"nombre": "Ultimate Evasion", "duracion": 59, "cd": 900},
-    
-    
-    {"nombre": "Hide", "duracion": 30, "cd": 3},
-    {"nombre": "Dodge", "duracion": 10, "cd": 2},
-    
-    
-    
+    {"nombre": "Hide", "duracion": 30, "cd": 200},
+    {"nombre": "Dodge", "duracion": 10, "cd": 60},
     {"nombre": "Counterattack", "duracion": 10, "cd": 70},
-    
-    
     {"nombre": "Battle Rhapsody", "duracion": 30, "cd": 240},
     {"nombre": "Song of Protection", "duracion": 30, "cd": 240},
     {"nombre": "Servitor Empowerment", "duracion": 30, "cd": 900},
@@ -76,13 +69,13 @@ ultimates_data = [
     {"nombre": "Sword Shield", "duracion": 30, "cd": 350},
     {"nombre": "Soul Barrier", "duracion": 50, "cd":60},
     {"nombre": "Red Talisman of Maximum Clarity", "duracion": 90, "cd":600},
-    {"nombre": "Blue Talisman of Divine Protection", "duracion": 10, "cd":600}
+    {"nombre": "Blue Talisman of Divine Protection", "duracion": 9, "cd":600}
 ]
 
 # --- Configuración global ---
 rect_width = 215
 rect_height = 50
-solapa_height = 12
+solapa_height = 11
 ultimates_dict = {entry['nombre'].lower(): entry for entry in ultimates_data}
 pos = {'x': 0, 'y': 0, 'width': rect_width, 'height': rect_height}
 active_alerts = {}
@@ -155,7 +148,14 @@ def crear_overlay():
     root.configure(bg='white')
     root.geometry(f"{total_width}x{canvas_h}+{pos['x']}+{pos['y']}")
 
-    canvas = tk.Canvas(root, width=total_width, height=visible_h, bg='white', highlightthickness=0)
+    canvas = tk.Canvas(
+    root,
+    width=total_width,
+    height=visible_h,
+    bg='white',                # Color de fondo visible
+    highlightthickness=0,          # Grosor del borde
+    highlightbackground='red'      # Color del borde visible
+)
     canvas.pack()
 
     # Dibujar rectángulo desplazado a la derecha
@@ -163,6 +163,19 @@ def crear_overlay():
     canvas.create_rectangle(margin_left, solapa_height, margin_left + rect_width, visible_h, outline='#427ed7', width=4)
 
     # Label fijo a la izquierda
+        # Botón RESET a la izquierda
+    boton_reset = tk.Button(
+        root,
+        text="RESET",
+        command=reset_alertas,
+        bg='#427ed7',
+        fg="#D1D1D1",
+        font=('Segoe UI', 6, 'bold'),
+        relief='flat',
+        cursor='hand2'
+    )
+    boton_reset.place(x=138, y=solapa_height-34 + (rect_height) // 2, width=30, height=11)
+
 
 
     # Frame de íconos debajo del rectángulo, también desplazado
@@ -214,6 +227,13 @@ def detectar_habilidades(imagen):
         match = difflib.get_close_matches(txt, list(ultimates_dict.keys()), n=1, cutoff=0.75)
         if match:
             habilidad = match[0]
+            if habilidad in active_alerts and active_alerts[habilidad].get("ready", False):
+                # Eliminar la entrada anterior READY para registrar una nueva instancia
+                data = active_alerts[habilidad]
+                if data.get('label_ready'):
+                    data['label_ready'].destroy()
+                active_alerts.pop(habilidad)
+
             if habilidad not in active_alerts:
                 print(f"[ALERTA] Se detectó habilidad: {habilidad}")
                 duracion = ultimates_dict[habilidad]['duracion']
@@ -228,7 +248,7 @@ def registrar_alerta(habilidad, now, duracion):
     y_offset = len(active_alerts) * 18
 
     cd = ultimates_dict[habilidad]['cd']
-    mostrar_cd = cd < 300
+    mostrar_cd = True
     cd_end = now + cd if mostrar_cd else None
     
     label_cd = None
@@ -333,40 +353,36 @@ def actualizar_alertas():
                     print("[READY] Habilidad lista:", key)
 
                     if not data.get('label_ready'):
-                        label_ready_container = tk.Frame(root, bg='white')
                         label_ready = tk.Label(
-                            label_ready_container,
-                            text=f"{key.title()}: READY",
+                            root,
+                            text=f"{key.title()}: ✅",
                             bg='#427ed7',
                             fg='#f0f0f0',
                             font=('Segoe UI', 9),
                             padx=3,
-                            pady=0
+                            pady=0,
+                            anchor='e',         # ← alinear a la derecha del label
+                            justify='right'
                         )
-                        label_ready.pack(anchor='e')
-
-                        data['label_ready'] = label_ready_container
+                        data['label_ready'] = label_ready
                         data['ready_time'] = time.time()
                         data['ready'] = True
-
-                        # Colocar provisionalmente hasta el siguiente loop
-                        label_ready_container.place(x=10, y=0, width=140 - 10)
+                        print(f"[DEBUG] {key.title()} cambió a estado READY")
+                        #label_ready.place(x=10, y=2 + y_offset)
 
                     # Marcar para eliminación lógica (pero no visual)
                     expiradas.append(key)
 
     # Eliminar entradas expiradas (READY o sin CD)
     for key in expiradas:
-        # Conserva visual de READY si existe
         data = active_alerts[key]
         if not data.get('ready', False):
-            # Si no está en estado READY, eliminar sin guardar nada
+            # Si no está en estado READY, eliminar completamente
             if data.get('label_cd'):
                 data['label_cd'].destroy()
-            if data.get('label_ready'):
-                data['label_ready'].destroy()
-        # Quitar del diccionario
-        active_alerts.pop(key)
+            if data.get('container'):
+                data['container'].destroy()
+            active_alerts.pop(key)
 
     # Reposicionar etiquetas visuales (CD y READY)
     actualizar_posiciones_labels()
@@ -391,13 +407,22 @@ def actualizar_posiciones_labels():
     ready_labels = [d for d in active_alerts.values() if d.get('label_ready')]
     for idx, data in enumerate(ready_labels):
         y_offset = idx * 18
-        data['y_offset'] = y_offset
-        margin_left = 140
         max_width = margin_left - 10
-        data['label_ready'].place(x=10, y=base_y + y_offset, width=max_width)
+        data['y_offset'] = y_offset
+        data['label_ready'].place(x=margin_left - data['label_ready'].winfo_reqwidth(), y=0 + y_offset)
 
-
-
+def reset_alertas():
+    global active_alerts
+    for key, data in active_alerts.items():
+        if data.get('label_cd'):
+            data['label_cd'].destroy()
+        if data.get('label_ready'):
+            data['label_ready'].destroy()
+        if data.get('container'):
+            data['container'].destroy()
+    active_alerts.clear()
+    actualizar_posiciones_labels()
+    print("[RESET] Estado reiniciado")
 
 
 
@@ -413,9 +438,6 @@ def bucle_principal():
 # --- Inicio del sistema ---
 
 if __name__ == "__main__":
-    print(torch.__version__)
-    print(torchvision.__version__)
-    print(torch.cuda.is_available())
     print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CUDA no disponible")
     
     cargar_iconos()
