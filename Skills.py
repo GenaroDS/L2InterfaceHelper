@@ -10,6 +10,9 @@ import difflib
 from tkinter import font
 from PIL import Image, ImageTk
 import os
+import msvcrt
+import sys
+
 
 global root  # declarar root global
 
@@ -131,6 +134,7 @@ def obtener_posicion_centrada():
     pos['x'] = (sw - rect_width) // 2
     pos['y'] = 50
 
+
 def crear_overlay():
     global root, frame_iconos
     obtener_posicion_centrada()
@@ -176,7 +180,18 @@ def crear_overlay():
     )
     boton_reset.place(x=138, y=solapa_height-34 + (rect_height) // 2, width=30, height=11)
 
-
+    boton_cerrar = tk.Button(
+        root,
+        text="❌",
+        command=lambda: sys.exit(0),
+        bg='#427ed7',
+        activebackground='#427ed7',
+        fg="#D1D1D1",
+        font=('Segoe UI', 7, 'bold'),
+        relief='flat',
+        cursor='hand2'
+    )
+    boton_cerrar.place(x=total_width - 220, y=0, width=20, height=solapa_height)
 
     # Frame de íconos debajo del rectángulo, también desplazado
     frame_iconos = tk.Frame(root, bg='white')
@@ -302,8 +317,6 @@ def registrar_alerta(habilidad, now, duracion):
         'label_cd': label_cd,
         'label_ready': None,
     }
-
-
 
 
 def actualizar_alertas():
@@ -437,7 +450,18 @@ def bucle_principal():
 
 # --- Inicio del sistema ---
 
+def check_single_instance(lockfile_path="instance.lock"):
+    fp = open(lockfile_path, "w")
+    try:
+        msvcrt.locking(fp.fileno(), msvcrt.LK_NBLCK, 1)
+    except IOError:
+        print("[ERROR] Ya hay una instancia en ejecución.")
+        sys.exit(0)
+    return fp
+
+
 if __name__ == "__main__":
+    lock_file = check_single_instance()
     print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CUDA no disponible")
     
     cargar_iconos()

@@ -1,0 +1,27 @@
+# Python compilados
+__pycache__/
+*.py[cod]
+
+# PyInstaller
+build/
+dist/
+*.spec
+
+# Lock para evitar instancias duplicadas
+instance.lock
+
+# Archivos temporales o de entorno
+*.log
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+
+# Entornos virtuales
+.venv/
+env/
+ENV/
+
+# Archivos del sistema o IDEs
+.vscode/
+.idea/
