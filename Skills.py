@@ -1,4 +1,6 @@
 import easyocr
+from pystray import Menu, MenuItem, Icon
+from PIL import Image as PILImage
 import numpy as np
 from PIL import ImageGrab
 import time
@@ -12,9 +14,28 @@ from PIL import Image, ImageTk
 import os
 import msvcrt
 import sys
+import ctypes
+from ctypes import wintypes
+
 
 
 global root  # declarar root global
+
+tray_icon = None
+stop_event = threading.Event()
+visible_event = threading.Event()  # controla si el OCR corre
+visible_event.set()   
+_kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+CreateMutexW  = _kernel32.CreateMutexW
+CreateMutexW.argtypes = (wintypes.LPVOID, wintypes.BOOL, wintypes.LPCWSTR)
+CreateMutexW.restype  = wintypes.HANDLE
+CloseHandle   = _kernel32.CloseHandle
+CloseHandle.argtypes  = (wintypes.HANDLE,)
+CloseHandle.restype   = wintypes.BOOL
+
+ERROR_ALREADY_EXISTS = 183
+
+mutex_handle = None  # global
 
 iconos = {}
 # --- Hablidades ----
@@ -86,13 +107,20 @@ active_alerts = {}
 # --- Inicialización de OCR ---
 reader = easyocr.Reader(['en'], gpu=True)
 
+def resource_path(rel):
+    if getattr(sys, 'frozen', False) and hasattr(sys, '_MEIPASS'):
+        base = sys._MEIPASS
+    else:
+        base = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base, rel)
+
 # --- Carga de íconos ---
 def cargar_iconos():
     if not tk._default_root:
         root = tk.Tk()
         root.withdraw()
 
-    ruta_iconos = os.path.join(os.path.dirname(__file__), "Icons")
+    ruta_iconos = ruta_iconos = resource_path("Icons")
     total = len(ultimates_dict)
     cargados = 0
     faltantes = []
@@ -183,7 +211,7 @@ def crear_overlay():
     boton_cerrar = tk.Button(
         root,
         text="❌",
-        command=lambda: sys.exit(0),
+        command=lambda: hide_window(),
         bg='#427ed7',
         activebackground='#427ed7',
         fg="#D1D1D1",
@@ -212,6 +240,7 @@ def crear_overlay():
     canvas.tag_bind("all", "<B1-Motion>", on_drag)
 
     root.canvas = canvas
+    root.protocol("WM_DELETE_WINDOW", hide_window)
     root.mainloop()
 
 
@@ -442,7 +471,13 @@ def reset_alertas():
 
 def bucle_principal():
     """Loop principal de OCR y gestión de alertas"""
-    while True:
+    while not stop_event.is_set():
+        # espera hasta que sea visible; sale periódicamente para chequear stop
+        if not visible_event.wait(timeout=0.5):
+            continue
+        if stop_event.is_set():
+            break
+
         imagen = capturar_imagen()
         detectar_habilidades(imagen)
         actualizar_alertas()
@@ -450,21 +485,89 @@ def bucle_principal():
 
 # --- Inicio del sistema ---
 
-def check_single_instance(lockfile_path="instance.lock"):
-    fp = open(lockfile_path, "w")
-    try:
-        msvcrt.locking(fp.fileno(), msvcrt.LK_NBLCK, 1)
-    except IOError:
+def check_single_instance_mutex(name=r"Local\SkillOCR_Singleton"):
+    """
+    Devuelve el handle del mutex si es la primera instancia.
+    Si ya existe otra, termina el proceso.
+    """
+    h = CreateMutexW(None, False, name)
+    if not h:
+        raise ctypes.WinError(ctypes.get_last_error())
+    # Si el mutex ya existía, GetLastError == ERROR_ALREADY_EXISTS
+    if ctypes.get_last_error() == ERROR_ALREADY_EXISTS:
         print("[ERROR] Ya hay una instancia en ejecución.")
         sys.exit(0)
-    return fp
+    return h
 
+def get_icon_path(icon_name):
+    base_path = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.path.dirname(os.path.abspath(sys.argv[0]))
+    return os.path.join(base_path, 'Icons', icon_name)
+
+def tray_set_icon(name):
+    global tray_icon
+    if tray_icon is not None:
+        try:
+            tray_icon.icon = PILImage.open(get_icon_path(name))
+        except Exception:
+            pass
+
+def show_window():
+    if root and root.winfo_exists():
+        root.deiconify()
+        root.lift()
+        root.attributes("-topmost", True)
+        visible_event.set()  # reanudar OCR
+
+def hide_window():
+    if root and root.winfo_exists():
+        root.withdraw()
+    visible_event.clear()  
+
+def exit_app():
+    visible_event.set()
+    stop_event.set()
+    try:
+        if tray_icon: tray_icon.stop()
+    except Exception:
+        pass
+    # liberar mutex
+    global mutex_handle
+    if mutex_handle:
+        CloseHandle(mutex_handle)
+        mutex_handle = None
+    if root and root.winfo_exists():
+        root.after(0, root.destroy)
+    os._exit(0)
+
+
+def setup_tray():
+    global tray_icon
+    menu = Menu(
+        MenuItem('Show', lambda i: show_window()),
+        MenuItem('Hide', lambda i: hide_window()),
+        MenuItem('Exit', lambda i: exit_app())
+    )
+
+    # ÚNICO icono de la bandeja
+    img = PILImage.open(get_icon_path('Systray.png'))  # 16–32 px recomendado
+    tray_icon = Icon('SkillOCR', img, 'L2 Interface Helper', menu=menu)
+
+    # correr en hilo aparte
+    threading.Thread(target=tray_icon.run, daemon=True).start()
+
+# (opcional) si querés cambiar solo el tooltip:
+def tray_set_tooltip(texto):
+    if tray_icon:
+        tray_icon.title = texto
 
 if __name__ == "__main__":
-    lock_file = check_single_instance()
-    print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CUDA no disponible")
-    
+    mutex_handle = check_single_instance_mutex()  # <- sin archivo en disco
+    # print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else "CUDA no disponible")
+
     cargar_iconos()
+
+    # Iniciar icono de bandeja (hilo propio)
+    setup_tray()
 
     # Iniciar OCR en background
     threading.Thread(target=bucle_principal, daemon=True).start()
