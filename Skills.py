@@ -20,6 +20,7 @@ from ctypes import wintypes
 
 
 global root  # declarar root global
+reader = None  # init perezosa
 
 tray_icon = None
 stop_event = threading.Event()
@@ -42,7 +43,31 @@ iconos = {}
 ultimates_data = [
     {"nombre": "Shield of Faith", "duracion": 30, "cd": 900},
     {"nombre": "Seed of Revenge", "duracion": 15, "cd": 900},    
+
+    
+    {"nombre": "Bear Spirit Totem", "duracion": 300, "cd": 30},
+
+
+    {"nombre": "Hawk Spirit Totem", "duracion": 300, "cd": 30},
+
+
+    {"nombre": "Rabbit Spirit Totem", "duracion": 300, "cd": 30},
+
+
+    {"nombre": "Ogre Spirit Totem", "duracion": 300, "cd": 30},
+
+
+    {"nombre": "Item Skill Might", "duracion": 120, "cd": 300},
+    {"nombre": "Item Skill Shield", "duracion": 120, "cd": 300},
+    {"nombre": "Item Skill Magic Barrier", "duracion": 120, "cd": 300},
+    {"nombre": "Item Skill Duel Might", "duracion": 120, "cd": 300},
+    {"nombre": "Item Skill Lesser Celestial Shield", "duracion": 10, "cd": 300},
+    {"nombre": "Item Skill Wild Magic", "duracion": 120, "cd": 300},
+    {"nombre": "Item Skill Music refresh", "duracion": 120, "cd": 300},
+    {"nombre": "Item Skill Vampiric Rage", "duracion": 120, "cd": 300},
+    {"nombre": "Arcane Shield", "duracion": 10, "cd": 120},  
     {"nombre": "Spirit of Phoenix", "duracion": 15, "cd": 900},
+    {"nombre": "Mystic Immunity", "duracion": 30, "cd": 900},
     {"nombre": "Evas Will", "duracion": 15, "cd": 900},
     {"nombre": "Pain of Shillen", "duracion": 15, "cd": 900},
     {"nombre": "Vengeance", "duracion": 30, "cd": 900},
@@ -95,6 +120,15 @@ ultimates_data = [
     {"nombre": "Red Talisman of Maximum Clarity", "duracion": 90, "cd":600},
     {"nombre": "Blue Talisman of Divine Protection", "duracion": 9, "cd":600}
 ]
+
+grupos_exclusivos = {
+    "totems": [
+        "hawk spirit totem",
+        "bear spirit totem",
+        "rabbit spirit totem",
+        "ogre spirit totem"
+    ]
+}
 
 # --- Configuración global ---
 rect_width = 215
@@ -162,6 +196,11 @@ def obtener_posicion_centrada():
     pos['x'] = (sw - rect_width) // 2
     pos['y'] = 50
 
+def get_reader():
+    global reader
+    if reader is None:
+        reader = easyocr.Reader(['en'], gpu=True)  # poné gpu=False para testear arranque
+    return reader
 
 def crear_overlay():
     global root, frame_iconos
@@ -180,14 +219,17 @@ def crear_overlay():
     root.configure(bg='white')
     root.geometry(f"{total_width}x{canvas_h}+{pos['x']}+{pos['y']}")
 
+    hide_window() 
+
     canvas = tk.Canvas(
     root,
     width=total_width,
     height=visible_h,
-    bg='white',                # Color de fondo visible
+    bg='white',                # Color de fondo visible1
     highlightthickness=0,          # Grosor del borde
     highlightbackground='red'      # Color del borde visible
 )
+    
     canvas.pack()
 
     # Dibujar rectángulo desplazado a la derecha
@@ -262,30 +304,34 @@ def capturar_imagen():
 
 
 def detectar_habilidades(imagen):
-    resultados = reader.readtext(imagen, detail=0)
+    resultados = get_reader().readtext(imagen, detail=0)
     now = time.time()
 
     for texto in resultados:
-        print(f"[OCR]: {texto}")
+        print(f"[OCR]: {texto}")    
         txt = texto.strip().lower()
         match = difflib.get_close_matches(txt, list(ultimates_dict.keys()), n=1, cutoff=0.75)
         if match:
             habilidad = match[0]
             if habilidad in active_alerts and active_alerts[habilidad].get("ready", False):
-                # Eliminar la entrada anterior READY para registrar una nueva instancia
                 data = active_alerts[habilidad]
                 if data.get('label_ready'):
                     data['label_ready'].destroy()
                 active_alerts.pop(habilidad)
 
             if habilidad not in active_alerts:
-                print(f"[ALERTA] Se detectó habilidad: {habilidad}")
                 duracion = ultimates_dict[habilidad]['duracion']
                 root.after(0, registrar_alerta, habilidad, now, duracion)
 
 
+
 def registrar_alerta(habilidad, now, duracion):
+
+
     global root, frame_iconos
+    
+
+
     margin_left = 140  # mantener coherencia con crear_overlay
     base_x = rect_width + margin_left
     base_y = 0
@@ -470,14 +516,11 @@ def reset_alertas():
 
 
 def bucle_principal():
-    """Loop principal de OCR y gestión de alertas"""
     while not stop_event.is_set():
-        # espera hasta que sea visible; sale periódicamente para chequear stop
         if not visible_event.wait(timeout=0.5):
             continue
         if stop_event.is_set():
             break
-
         imagen = capturar_imagen()
         detectar_habilidades(imagen)
         actualizar_alertas()
@@ -500,8 +543,7 @@ def check_single_instance_mutex(name=r"Local\SkillOCR_Singleton"):
     return h
 
 def get_icon_path(icon_name):
-    base_path = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.path.dirname(os.path.abspath(sys.argv[0]))
-    return os.path.join(base_path, 'Icons', icon_name)
+    return resource_path(os.path.join('Icons', icon_name))
 
 def tray_set_icon(name):
     global tray_icon
@@ -527,10 +569,10 @@ def exit_app():
     visible_event.set()
     stop_event.set()
     try:
-        if tray_icon: tray_icon.stop()
+        if tray_icon:
+            tray_icon.stop()
     except Exception:
         pass
-    # liberar mutex
     global mutex_handle
     if mutex_handle:
         CloseHandle(mutex_handle)
@@ -539,21 +581,23 @@ def exit_app():
         root.after(0, root.destroy)
     os._exit(0)
 
-
 def setup_tray():
     global tray_icon
     menu = Menu(
         MenuItem('Show', lambda i: show_window()),
         MenuItem('Hide', lambda i: hide_window()),
-        MenuItem('Exit', lambda i: exit_app())
+        MenuItem('Exit',     lambda i: exit_app())
     )
+    try:
+        img = PILImage.open(get_icon_path('Systray.png'))  # 16–32 px recomendado
+    except Exception as e:
+        print('[TRAY] Icono no cargado, fallback:', e)
+        from PIL import Image as _PILImg
+        img = _PILImg.new('RGBA', (16, 16), (0, 0, 0, 255))
 
-    # ÚNICO icono de la bandeja
-    img = PILImage.open(get_icon_path('Systray.png'))  # 16–32 px recomendado
     tray_icon = Icon('SkillOCR', img, 'L2 Interface Helper', menu=menu)
-
-    # correr en hilo aparte
     threading.Thread(target=tray_icon.run, daemon=True).start()
+
 
 # (opcional) si querés cambiar solo el tooltip:
 def tray_set_tooltip(texto):
