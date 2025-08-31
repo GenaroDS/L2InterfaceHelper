@@ -17,7 +17,7 @@ import sys
 import ctypes
 from ctypes import wintypes
 
-
+ # El problema es ccuando pasan 30 segundos?
 
 global root  # declarar root global
 reader = None  # init perezosa
@@ -330,7 +330,19 @@ def registrar_alerta(habilidad, now, duracion):
 
     global root, frame_iconos
     
-
+    for grupo, miembros in grupos_exclusivos.items():
+        if habilidad in miembros:  # si el skill pertenece a este grupo
+            for otro in list(active_alerts.keys()):
+                if otro != habilidad and otro in miembros:
+                    # borrar solo lo visual (duración / ícono), NO el CD
+                    data_otro = active_alerts[otro]
+                    if data_otro.get('container'):
+                        data_otro['container'].destroy()
+                        data_otro['container'] = None
+                    # mantener label_cd y cd_end para que siga contando cooldown
+                    # marcar como expirado visualmente
+                    data_otro['end'] = now  # fuerza expiración del timer
+                    print(f"[EXCLUSIVO] {otro.title()} reemplazado por {habilidad.title()}")
 
     margin_left = 140  # mantener coherencia con crear_overlay
     base_x = rect_width + margin_left
